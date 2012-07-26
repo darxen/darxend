@@ -30,6 +30,7 @@ func main() {
 		http.Redirect(w, req, "/test/", 301)
 	})
 	http.HandleFunc("/test/", test)
+	http.HandleFunc("/ls/", ls)
 
 	err := http.ListenAndServe(":" + port(), nil)
 	if err != nil {
@@ -88,3 +89,43 @@ func test(w http.ResponseWriter, req *http.Request) {
 
 }
 
+func ls(w http.ResponseWriter, req *http.Request) {
+
+	defer func() {
+		if r := recover(); r != nil {
+			header := w.Header()
+			header.Set("Content-Type", "text/html")
+			w.WriteHeader(501)
+			fmt.Fprintf(w, "<h1>501 Internal Server Error</h1><h3>%s</h3>", r)
+		}
+	}()
+
+	conn, err := ftp.Connect("tgftp.nws.noaa.gov:21")
+	if err != nil {
+		panic("Unable to connect")
+	}
+
+	err = conn.Login("anonymous", "darxen")
+	if err != nil {
+		panic("Unable to login")
+	}
+
+	err = conn.ChangeDir("SL.us008001/DF.of/DC.radar/DS.p19r0/SI.klot")
+	if err != nil {
+		panic("Unable to chdir")
+	}
+
+	entries, err := conn.List(".")
+	if err != nil {
+		panic("Unable to lookup directory")
+	}
+	conn.Quit()
+
+	header := w.Header()
+	header.Set("Content-Type", "text/html")
+	fmt.Fprintf(w, "<ul>")
+	for _, entry := range entries {
+		fmt.Fprintf(w, "<li>%s - %d</li>", entry.Name, entry.Size)
+	}
+	fmt.Fprintf(w, "</ul>")
+}
