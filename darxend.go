@@ -9,6 +9,7 @@ import (
 	"github.com/darxen/goftp"
 	"sort"
 	"errors"
+	"strings"
 )
 
 var DEBUG bool = true
@@ -147,7 +148,36 @@ func latest(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	entry := entries[len(entries)-1]
+	url := req.URL
+	parts := strings.Split(strings.Trim(url.Path, "/"), "/")
+	var entry *ftp.Entry
+	if len(parts) > 1 {
+		//find the entry before the one specified
+		excluded := parts[1]
+		entry = func() *ftp.Entry {
+			for i := len(entries)-1; i > 0; i -= 1 {
+				if excluded == entries[i].Name {
+					return entries[i-1]
+				}
+			}
+			return nil
+		}()
+	} else {
+		//use the latest entry
+		entry = entries[len(entries)-1]
+	}
+
+	if entry == nil {
+		header := w.Header()
+		header.Set("Content-Type", "text/html")
+		w.WriteHeader(401)
+		fmt.Fprintf(w, "<h1>404 Not Found</h1>")
+		return
+	}
+
+	//header := w.Header()
+	//header.Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", entry.Name))
+
 	fmt.Fprintf(w, "Latest: %s", entry.Name)
 }
 
