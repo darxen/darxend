@@ -7,6 +7,7 @@ import (
 	"os"
 	"log"
 	"github.com/darxen/goftp"
+	"sort"
 )
 
 var DEBUG bool = true
@@ -89,6 +90,15 @@ func test(w http.ResponseWriter, req *http.Request) {
 
 }
 
+func prune(entries []*ftp.Entry) (result []*ftp.Entry) {
+	for _, entry := range entries {
+		if entry.Name != "sn.last" {
+			result = append(result, entry)
+		}
+	}
+	return
+}
+
 func ls(w http.ResponseWriter, req *http.Request) {
 
 	defer func() {
@@ -120,6 +130,9 @@ func ls(w http.ResponseWriter, req *http.Request) {
 		panic("Unable to lookup directory")
 	}
 	conn.Quit()
+
+	sort.Sort(ftp.ByTime{entries})
+	entries = prune(entries)
 
 	header := w.Header()
 	header.Set("Content-Type", "text/html")
