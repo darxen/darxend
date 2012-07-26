@@ -102,34 +102,56 @@ func prune(entries []*ftp.Entry) (result []*ftp.Entry) {
 	return
 }
 
-func loadEntries() (entries []*ftp.Entry, err error) {
+func openConnection(site string) (conn *ftp.ServerConn, err error) {
+
+	conn, err = ftp.Connect("tgftp.nws.noaa.gov:21")
+	if err != nil {
+		return nil, errors.New("Unable to connect")
+	}
 	defer func() {
-		if r := recover(); r != nil {
-			v, _ := r.(string)
-			entries = nil
-			err = errors.New(v)
+		if err != nil && conn != nil {
+			conn.Quit()
+			conn = nil
 		}
 	}()
 
-	conn, err := ftp.Connect("tgftp.nws.noaa.gov:21")
-	if err != nil {
-		panic("Unable to connect")
-	}
-	defer conn.Quit()
-
 	err = conn.Login("anonymous", "darxen")
 	if err != nil {
-		panic("Unable to login")
+		return conn, errors.New("Unable to login")
 	}
 
-	err = conn.ChangeDir("SL.us008001/DF.of/DC.radar/DS.p19r0/SI.klot")
+	path := fmt.Sprintf("SL.us008001/DF.of/DC.radar/DS.p19r0/SI.%s", site)
+	err = conn.ChangeDir(path)
 	if err != nil {
-		panic("Unable to chdir")
+		return conn, errors.New("Unable to chdir")
 	}
 
+	return conn, nil
+}
+
+func closeConnection(conn *ftp.ServerConn) {
+	conn.Quit()
+}
+
+func downloadFile(conn *ftp.ServerConn, path string) (data []byte, err error) {
+	stream, err := conn.Retr("sn.last")
+	if err != nil {
+		return nil, errors.New("Unable to start transfer")
+	}
+	defer stream.Close()
+
+	data, err = ioutil.ReadAll(stream)
+	if err != nil {
+		return nil, errors.New("Failed to read data file")
+	}
+
+	return data, nil
+}
+
+func loadEntries(conn *ftp.ServerConn) (entries []*ftp.Entry, err error) {
 	entries, err = conn.List(".")
 	if err != nil {
-		panic("Unable to lookup directory")
+		return nil, errors.New("Unable to lookup directory")
 	}
 
 	sort.Sort(ftp.ByTime{entries})
@@ -139,13 +161,25 @@ func loadEntries() (entries []*ftp.Entry, err error) {
 }
 
 func latest(w http.ResponseWriter, req *http.Request) {
-	entries, err := loadEntries()
+	defer func() {
+		if r := recover(); r != nil {
+			err, _ := r.(error)
+			header := w.Header()
+			header.Set("Content-Type", "text/html")
+			w.WriteHeader(501)
+			fmt.Fprintf(w, "<h1>501 Internal Server Error</h1><h3>%s</h3>", err)
+		}
+	}()
+
+	conn, err := openConnection("klot")
 	if err != nil {
-		header := w.Header()
-		header.Set("Content-Type", "text/html")
-		w.WriteHeader(501)
-		fmt.Fprintf(w, "<h1>501 Internal Server Error</h1><h3>%s</h3>", err)
-		return
+		panic(err)
+	}
+	defer closeConnection(conn)
+
+	entries, err := loadEntries(conn)
+	if err != nil {
+		panic(err)
 	}
 
 	url := req.URL
@@ -175,21 +209,40 @@ func latest(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	//header := w.Header()
-	//header.Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", entry.Name))
+	data, err := downloadFile(conn, entry.Name)
+	if err != nil {
+		panic(err)
+	}
 
-	fmt.Fprintf(w, "Latest: %s", entry.Name)
+	header := w.Header()
+	header.Set("Content-Type", "application/octet-stream")
+	header.Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", entry.Name))
+	header.Set("Filename", entry.Name)
+
+	w.Write(data)
 }
 
 func ls(w http.ResponseWriter, req *http.Request) {
 
-	entries, err := loadEntries()
+	defer func() {
+		if r := recover(); r != nil {
+			err, _ := r.(error)
+			header := w.Header()
+			header.Set("Content-Type", "text/html")
+			w.WriteHeader(501)
+			fmt.Fprintf(w, "<h1>501 Internal Server Error</h1><h3>%s</h3>", err)
+		}
+	}()
+
+	conn, err := openConnection("klot")
 	if err != nil {
-		header := w.Header()
-		header.Set("Content-Type", "text/html")
-		w.WriteHeader(501)
-		fmt.Fprintf(w, "<h1>501 Internal Server Error</h1><h3>%s</h3>", err)
-		return
+		panic(err)
+	}
+	defer closeConnection(conn)
+
+	entries, err := loadEntries(conn)
+	if err != nil {
+		panic(err)
 	}
 
 	header := w.Header()
