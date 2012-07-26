@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"os"
 	"log"
-	"github.com/jlaffaye/goftp"
+	"github.com/darxen/goftp"
 )
 
 var DEBUG bool = true
@@ -125,7 +125,7 @@ func ls(w http.ResponseWriter, req *http.Request) {
 	header.Set("Content-Type", "text/html")
 	fmt.Fprintf(w, "<ul>")
 	for _, entry := range entries {
-		fmt.Fprintf(w, "<li>%s - %d</li>", entry.Name, entry.Size)
+		fmt.Fprintf(w, "<li>%s - %d - %s</li>", entry.Name, entry.Size, entry.Time)
 	}
 	fmt.Fprintf(w, "</ul>")
 }
