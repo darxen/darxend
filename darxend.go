@@ -8,6 +8,7 @@ import (
 	"log"
 	"github.com/darxen/goftp"
 	"sort"
+	"errors"
 )
 
 var DEBUG bool = true
@@ -31,6 +32,7 @@ func main() {
 		http.Redirect(w, req, "/test/", 301)
 	})
 	http.HandleFunc("/test/", test)
+	http.HandleFunc("/latest/", latest)
 	http.HandleFunc("/ls/", ls)
 
 	err := http.ListenAndServe(":" + port(), nil)
@@ -99,14 +101,12 @@ func prune(entries []*ftp.Entry) (result []*ftp.Entry) {
 	return
 }
 
-func ls(w http.ResponseWriter, req *http.Request) {
-
+func loadEntries() (entries []*ftp.Entry, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			header := w.Header()
-			header.Set("Content-Type", "text/html")
-			w.WriteHeader(501)
-			fmt.Fprintf(w, "<h1>501 Internal Server Error</h1><h3>%s</h3>", r)
+			v, _ := r.(string)
+			entries = nil
+			err = errors.New(v)
 		}
 	}()
 
@@ -114,6 +114,7 @@ func ls(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		panic("Unable to connect")
 	}
+	defer conn.Quit()
 
 	err = conn.Login("anonymous", "darxen")
 	if err != nil {
@@ -125,14 +126,41 @@ func ls(w http.ResponseWriter, req *http.Request) {
 		panic("Unable to chdir")
 	}
 
-	entries, err := conn.List(".")
+	entries, err = conn.List(".")
 	if err != nil {
 		panic("Unable to lookup directory")
 	}
-	conn.Quit()
 
 	sort.Sort(ftp.ByTime{entries})
 	entries = prune(entries)
+
+	return entries, nil
+}
+
+func latest(w http.ResponseWriter, req *http.Request) {
+	entries, err := loadEntries()
+	if err != nil {
+		header := w.Header()
+		header.Set("Content-Type", "text/html")
+		w.WriteHeader(501)
+		fmt.Fprintf(w, "<h1>501 Internal Server Error</h1><h3>%s</h3>", err)
+		return
+	}
+
+	entry := entries[len(entries)-1]
+	fmt.Fprintf(w, "Latest: %s", entry.Name)
+}
+
+func ls(w http.ResponseWriter, req *http.Request) {
+
+	entries, err := loadEntries()
+	if err != nil {
+		header := w.Header()
+		header.Set("Content-Type", "text/html")
+		w.WriteHeader(501)
+		fmt.Fprintf(w, "<h1>501 Internal Server Error</h1><h3>%s</h3>", err)
+		return
+	}
 
 	header := w.Header()
 	header.Set("Content-Type", "text/html")
@@ -142,3 +170,4 @@ func ls(w http.ResponseWriter, req *http.Request) {
 	}
 	fmt.Fprintf(w, "</ul>")
 }
+
