@@ -33,6 +33,9 @@ func port() (res string) {
 func main() {
 	http.HandleFunc("/", root)
 	http.HandleFunc("/latest/", latest)
+	// /latest/klot/N0R         - latest data file, always
+	// /latest/klot/N0R/sn.0001 - latest data file, or 304 No Content if same file
+	// /before/klot/N0R/sn.0001 - sn.0000 data file
 	http.HandleFunc("/ls/", ls)
 
 	err := http.ListenAndServe(":" + port(), nil)
@@ -152,6 +155,21 @@ func latest(w http.ResponseWriter, req *http.Request) {
 	}
 	defer closeConnection(conn)
 
+	previousPath := func (path string) string {
+		re := regexp.MustCompile("^sn\\.(\\d\\d\\d\\d)$")
+		v := re.FindStringSubmatch(path)
+		if len(v) != 2 {
+			return ""
+		}
+		val, _ := strconv.Atoi(v[1])
+		if val == 0 {
+			val = 250
+		} else {
+			val -= 1
+		}
+		return fmt.Sprintf("sn.%04d", val)
+	}
+
 	var path string
 	if len(parts) > 3 {
 		//determine path based on the URL
@@ -161,19 +179,11 @@ func latest(w http.ResponseWriter, req *http.Request) {
 		if err != nil || !valid {
 		}
 
-		re := regexp.MustCompile("^sn\\.(\\d\\d\\d\\d)$")
-		v := re.FindStringSubmatch(excluded)
-		if len(v) != 2 {
+		path = previousPath(excluded)
+		if path == "" {
 			handleClientError(w, req, "Invalid URL format")
 			return
 		}
-		val, _ := strconv.Atoi(v[1])
-		if val == 0 {
-			val = 250
-		} else {
-			val -= 1
-		}
-		path = fmt.Sprintf("sn.%04d", val)
 
 	} else {
 		//determine path from a directory listing
@@ -186,6 +196,7 @@ func latest(w http.ResponseWriter, req *http.Request) {
 		entry := entries[len(entries)-1]
 		path = entry.Name
 	}
+	prev := previousPath(path)
 
 	data, err := downloadFile(conn, path)
 	if err != nil {
@@ -196,6 +207,7 @@ func latest(w http.ResponseWriter, req *http.Request) {
 	header.Set("Content-Type", "application/octet-stream")
 	header.Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", path))
 	header.Set("Filename", path)
+	header.Set("Previous-Filename", prev)
 
 	w.Write(data)
 }
