@@ -33,9 +33,7 @@ func port() (res string) {
 func main() {
 	http.HandleFunc("/", root)
 	http.HandleFunc("/latest/", latest)
-	// /latest/klot/N0R         - latest data file, always
-	// /latest/klot/N0R/sn.0001 - latest data file, or 304 No Content if same file
-	// /before/klot/N0R/sn.0001 - sn.0000 data file
+	http.HandleFunc("/before/", before)
 	http.HandleFunc("/ls/", ls)
 
 	err := http.ListenAndServe(":" + port(), nil)
@@ -115,11 +113,38 @@ func loadEntries(conn *ftp.ServerConn) (entries []*ftp.Entry, err error) {
 	return entries, nil
 }
 
+func handleNoContent(w http.ResponseWriter, req *http.Request) {
+	w.WriteHeader(304)
+}
+
 func handleClientError(w http.ResponseWriter, req *http.Request, msg string) {
 	header := w.Header()
 	header.Set("Content-Type", "text/html")
 	w.WriteHeader(404)
 	fmt.Fprintf(w, "<h1>404 Not Found</h1><h3>%s</h3>", msg)
+}
+
+func extractIndex(path string) string {
+	re := regexp.MustCompile("^sn\\.(\\d\\d\\d\\d)$")
+	v := re.FindStringSubmatch(path)
+	if len(v) != 2 {
+		return ""
+	}
+	return v[1]
+}
+
+func previousPath(path string) string {
+	v := extractIndex(path)
+	if v == "" {
+		return ""
+	}
+	val, _ := strconv.Atoi(v)
+	if val == 0 {
+		val = 250
+	} else {
+		val -= 1
+	}
+	return fmt.Sprintf("sn.%04d", val)
 }
 
 func latest(w http.ResponseWriter, req *http.Request) {
@@ -149,54 +174,99 @@ func latest(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	//determine the latest file stored by the client
+	var current string
+	if len(parts) > 3 {
+		current = parts[3]
+		if extractIndex(current) == "" {
+			handleClientError(w, req, "Invalid URL format")
+			return
+		}
+	}
+
 	conn, err := openConnection(site)
 	if err != nil {
 		panic(err)
 	}
 	defer closeConnection(conn)
 
-	previousPath := func (path string) string {
-		re := regexp.MustCompile("^sn\\.(\\d\\d\\d\\d)$")
-		v := re.FindStringSubmatch(path)
-		if len(v) != 2 {
-			return ""
-		}
-		val, _ := strconv.Atoi(v[1])
-		if val == 0 {
-			val = 250
-		} else {
-			val -= 1
-		}
-		return fmt.Sprintf("sn.%04d", val)
+	//determine path from a directory listing
+	entries, err := loadEntries(conn)
+	if err != nil {
+		panic(err)
 	}
 
-	var path string
-	if len(parts) > 3 {
-		//determine path based on the URL
-		excluded := parts[3]
+	//use the latest entry
+	entry := entries[len(entries)-1]
+	path := entry.Name
+	prev := previousPath(path)
 
-		valid, err := regexp.MatchString("sn\\.[0-9][0-9][0-9][0-9]", excluded)
-		if err != nil || !valid {
-		}
-
-		path = previousPath(excluded)
-		if path == "" {
-			handleClientError(w, req, "Invalid URL format")
+	//check if we need to download the file
+	if current != "" {
+		if current == path {
+			handleNoContent(w, req)
 			return
 		}
-
-	} else {
-		//determine path from a directory listing
-		entries, err := loadEntries(conn)
-		if err != nil {
-			panic(err)
-		}
-
-		//use the latest entry
-		entry := entries[len(entries)-1]
-		path = entry.Name
 	}
+
+	data, err := downloadFile(conn, path)
+	if err != nil {
+		panic(err)
+	}
+
+	header := w.Header()
+	header.Set("Content-Type", "application/octet-stream")
+	header.Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", path))
+	header.Set("Filename", path)
+	header.Set("Previous-Filename", prev)
+
+	w.Write(data)
+}
+
+func before(w http.ResponseWriter, req *http.Request) {
+	defer func() {
+		if r := recover(); r != nil {
+			err, _ := r.(error)
+			header := w.Header()
+			header.Set("Content-Type", "text/html")
+			w.WriteHeader(501)
+			fmt.Fprintf(w, "<h1>501 Internal Server Error</h1><h3>%s</h3>", err)
+		}
+	}()
+
+	parts := strings.Split(strings.Trim(req.URL.Path, "/"), "/")
+	if len(parts) < 2 {
+		handleClientError(w, req, "No radar site provided")
+		return
+	} else if len(parts) < 3 {
+		handleClientError(w, req, "No product provided")
+		return
+	} else if len(parts) < 4 {
+		handleClientError(w, req, "No filename provided")
+		return
+	}
+	site := parts[1]
+	product := parts[2]
+	excluded := parts[3]
+
+	if product != "N0R" {
+		handleClientError(w, req, "Invalid product type")
+		return
+	}
+
+	path := previousPath(excluded)
+	if path == "" {
+		handleClientError(w, req, "Invalid URL format")
+		return
+	}
+
 	prev := previousPath(path)
+
+	conn, err := openConnection(site)
+	if err != nil {
+		panic(err)
+	}
+	defer closeConnection(conn)
 
 	data, err := downloadFile(conn, path)
 	if err != nil {
