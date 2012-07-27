@@ -134,8 +134,17 @@ func latest(w http.ResponseWriter, req *http.Request) {
 	if len(parts) < 2 {
 		handleClientError(w, req, "No radar site provided")
 		return
+	} else if len(parts) < 3 {
+		handleClientError(w, req, "No product provided")
+		return
 	}
 	site := parts[1]
+	product := parts[2]
+
+	if product != "N0R" {
+		handleClientError(w, req, "Invalid product type")
+		return
+	}
 
 	conn, err := openConnection(site)
 	if err != nil {
@@ -144,9 +153,9 @@ func latest(w http.ResponseWriter, req *http.Request) {
 	defer closeConnection(conn)
 
 	var path string
-	if len(parts) > 2 {
+	if len(parts) > 3 {
 		//determine path based on the URL
-		excluded := parts[2]
+		excluded := parts[3]
 
 		valid, err := regexp.MatchString("sn\\.[0-9][0-9][0-9][0-9]", excluded)
 		if err != nil || !valid {
