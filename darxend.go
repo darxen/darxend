@@ -10,6 +10,8 @@ import (
 	"sort"
 	"errors"
 	"strings"
+	"regexp"
+	"strconv"
 )
 
 var DEBUG bool = true
@@ -126,47 +128,54 @@ func latest(w http.ResponseWriter, req *http.Request) {
 	}
 	defer closeConnection(conn)
 
-	entries, err := loadEntries(conn)
-	if err != nil {
-		panic(err)
-	}
-
-	url := req.URL
-	parts := strings.Split(strings.Trim(url.Path, "/"), "/")
-	var entry *ftp.Entry
+	var path string
+	parts := strings.Split(strings.Trim(req.URL.Path, "/"), "/")
 	if len(parts) > 1 {
-		//find the entry before the one specified
+		//determine path based on the URL
 		excluded := parts[1]
-		entry = func() *ftp.Entry {
-			for i := len(entries)-1; i > 0; i -= 1 {
-				if excluded == entries[i].Name {
-					return entries[i-1]
-				}
-			}
-			return nil
-		}()
+
+		valid, err := regexp.MatchString("sn\\.[0-9][0-9][0-9][0-9]", excluded)
+		if err != nil || !valid {
+		}
+
+		re := regexp.MustCompile("^sn\\.(\\d\\d\\d\\d)$")
+		v := re.FindStringSubmatch(excluded)
+		if len(v) != 2 {
+			header := w.Header()
+			header.Set("Content-Type", "text/html")
+			w.WriteHeader(401)
+			fmt.Fprintf(w, "<h1>404 Not Found</h1><h3>Invalid URL format</h3>")
+			return
+		}
+		val, _ := strconv.Atoi(v[1])
+		if val == 0 {
+			val = 250
+		} else {
+			val -= 1
+		}
+		path = fmt.Sprintf("sn.%04d", val)
+
 	} else {
+		//determine path from a directory listing
+		entries, err := loadEntries(conn)
+		if err != nil {
+			panic(err)
+		}
+
 		//use the latest entry
-		entry = entries[len(entries)-1]
+		entry := entries[len(entries)-1]
+		path = entry.Name
 	}
 
-	if entry == nil {
-		header := w.Header()
-		header.Set("Content-Type", "text/html")
-		w.WriteHeader(401)
-		fmt.Fprintf(w, "<h1>404 Not Found</h1>")
-		return
-	}
-
-	data, err := downloadFile(conn, entry.Name)
+	data, err := downloadFile(conn, path)
 	if err != nil {
 		panic(err)
 	}
 
 	header := w.Header()
 	header.Set("Content-Type", "application/octet-stream")
-	header.Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", entry.Name))
-	header.Set("Filename", entry.Name)
+	header.Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", path))
+	header.Set("Filename", path)
 
 	w.Write(data)
 }
