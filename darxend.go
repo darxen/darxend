@@ -28,11 +28,7 @@ func port() (res string) {
 }
 
 func main() {
-	http.HandleFunc("/", hello)
-	http.HandleFunc("/test", func(w http.ResponseWriter, req *http.Request) {
-		http.Redirect(w, req, "/test/", 301)
-	})
-	http.HandleFunc("/test/", test)
+	http.HandleFunc("/", root)
 	http.HandleFunc("/latest/", latest)
 	http.HandleFunc("/ls/", ls)
 
@@ -42,55 +38,8 @@ func main() {
 	}
 }
 
-func hello(w http.ResponseWriter, req *http.Request) {
-	var header = w.Header()
-	header.Set("Content-Type", "text/html")
-
-	fmt.Fprintf(w, "<h2>Hello <a href='/test'>world</a>!</h2>")
-}
-
-func test(w http.ResponseWriter, req *http.Request) {
-
-	defer func() {
-		if r := recover(); r != nil {
-			w.WriteHeader(501)
-			fmt.Fprintf(w, "Error: %s", r)
-		}
-	}()
-
-	conn, err := ftp.Connect("tgftp.nws.noaa.gov:21")
-	if err != nil {
-		panic("Unable to connect")
-	}
-
-	err = conn.Login("anonymous", "darxen")
-	if err != nil {
-		panic("Unable to login")
-	}
-
-	err = conn.ChangeDir("SL.us008001/DF.of/DC.radar/DS.p19r0/SI.klot")
-	if err != nil {
-		panic("Unable to chdir")
-	}
-
-	stream, err := conn.Retr("sn.last")
-	if err != nil {
-		panic("Unable to start transfer")
-	}
-
-	data, err := ioutil.ReadAll(stream)
-	if err != nil {
-		panic("Failed to read data file")
-	}
-
-	err = stream.Close()
-	conn.Quit()
-
-	//write the response
-	header := w.Header()
-	header.Set("Content-Type", "application/octet-stream")
-	_, err = w.Write(data)
-
+func root(w http.ResponseWriter, req *http.Request) {
+	http.Redirect(w, req, "http://play.google.com/store/apps/details?id=me.kevinwells.darxen", 301)
 }
 
 func prune(entries []*ftp.Entry) (result []*ftp.Entry) {
