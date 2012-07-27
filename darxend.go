@@ -1,17 +1,18 @@
 package main
 
 import (
-	"io/ioutil"
+	"errors"
 	"fmt"
+	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
-	"log"
-	"github.com/darxen/goftp"
-	"sort"
-	"errors"
-	"strings"
 	"regexp"
+	"sort"
 	"strconv"
+	"strings"
+
+	"github.com/darxen/goftp"
 )
 
 var DEBUG bool = true
