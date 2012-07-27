@@ -111,6 +111,13 @@ func loadEntries(conn *ftp.ServerConn) (entries []*ftp.Entry, err error) {
 	return entries, nil
 }
 
+func handleClientError(w http.ResponseWriter, req *http.Request, msg string) {
+	header := w.Header()
+	header.Set("Content-Type", "text/html")
+	w.WriteHeader(404)
+	fmt.Fprintf(w, "<h1>404 Not Found</h1><h3>%s</h3>", msg)
+}
+
 func latest(w http.ResponseWriter, req *http.Request) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -122,17 +129,23 @@ func latest(w http.ResponseWriter, req *http.Request) {
 		}
 	}()
 
-	conn, err := openConnection("klot")
+	parts := strings.Split(strings.Trim(req.URL.Path, "/"), "/")
+	if len(parts) < 2 {
+		handleClientError(w, req, "No radar site provided")
+		return
+	}
+	site := parts[1]
+
+	conn, err := openConnection(site)
 	if err != nil {
 		panic(err)
 	}
 	defer closeConnection(conn)
 
 	var path string
-	parts := strings.Split(strings.Trim(req.URL.Path, "/"), "/")
-	if len(parts) > 1 {
+	if len(parts) > 2 {
 		//determine path based on the URL
-		excluded := parts[1]
+		excluded := parts[2]
 
 		valid, err := regexp.MatchString("sn\\.[0-9][0-9][0-9][0-9]", excluded)
 		if err != nil || !valid {
@@ -141,10 +154,7 @@ func latest(w http.ResponseWriter, req *http.Request) {
 		re := regexp.MustCompile("^sn\\.(\\d\\d\\d\\d)$")
 		v := re.FindStringSubmatch(excluded)
 		if len(v) != 2 {
-			header := w.Header()
-			header.Set("Content-Type", "text/html")
-			w.WriteHeader(401)
-			fmt.Fprintf(w, "<h1>404 Not Found</h1><h3>Invalid URL format</h3>")
+			handleClientError(w, req, "Invalid URL format")
 			return
 		}
 		val, _ := strconv.Atoi(v[1])
