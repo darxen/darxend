@@ -36,7 +36,7 @@ func main() {
 	http.HandleFunc("/before/", before)
 	http.HandleFunc("/ls/", ls)
 
-	err := http.ListenAndServe(":" + port(), nil)
+	err := http.ListenAndServe(":"+port(), nil)
 	if err != nil {
 		log.Fatal("ListenAndServe:", err)
 	}
@@ -313,4 +313,3 @@ func ls(w http.ResponseWriter, req *http.Request) {
 	}
 	fmt.Fprintf(w, "</ul>")
 }
-
